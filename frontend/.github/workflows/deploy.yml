@@ -1,0 +1,56 @@
+name: CI/CD Deployment to GCP
+
+on:
+  push:
+    branches: [ "main" ] 
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v3
+
+    - name: Login to Docker Hub
+      uses: docker/login-action@v2
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+
+    
+    - name: Build and Push Backend
+      run: |
+        cd backend
+        docker build --platform linux/amd64 -t ${{ secrets.DOCKER_USERNAME }}/mean-backend:latest .
+        docker push ${{ secrets.DOCKER_USERNAME }}/mean-backend:latest
+
+    - name: Build and Push Frontend
+      run: |
+        cd frontend
+        docker build --platform linux/amd64 -t ${{ secrets.DOCKER_USERNAME }}/mean-frontend:latest .
+        docker push ${{ secrets.DOCKER_USERNAME }}/mean-frontend:latest
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v3
+
+    - name: Deploy to GCP VM via SSH
+      uses: appleboy/ssh-action@master
+      with:
+        host: ${{ secrets.HOST_DNS }}
+        username: ${{ secrets.USERNAME }}
+        key: ${{ secrets.EC2_SSH_KEY }}
+        script: |
+          # 1. Pull latest images (Docker Compose will use the newly pulled versions)
+          sudo docker pull ${{ secrets.DOCKER_USERNAME }}/mean-backend:latest
+          sudo docker pull ${{ secrets.DOCKER_USERNAME }}/mean-frontend:latest
+          
+          # 2. Change directory to where docker-compose.yml is saved
+          cd /home/${{ secrets.USERNAME }}
+          
+          # 3. Stop running containers and restart them using the new images
+          sudo docker-compose down
+          sudo docker-compose up -d
